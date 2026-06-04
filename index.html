@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXUS — Autonomous Fleet Coordinator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg: #070a0f;
+    --panel: #0b1118;
+    --border: #1a2535;
+    --accent: #00e5ff;
+    --accent2: #ff6b35;
+    --accent3: #39ff14;
+    --warn: #ffcc00;
+    --danger: #ff2d55;
+    --muted: #3a4a5c;
+    --text: #c8d8e8;
+    --text-dim: #4a6a8a;
+    --grid-line: rgba(0,229,255,0.04);
+    --robot-idle: #00e5ff;
+    --robot-moving: #39ff14;
+    --robot-charging: #ffcc00;
+    --robot-error: #ff2d55;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,229,255,0.012) 2px,
+      rgba(0,229,255,0.012) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  #header {
+    height: 52px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    background: rgba(11,17,24,0.95);
+    backdrop-filter: blur(10px);
+    flex-shrink: 0;
+  }
+
+  .logo {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 22px;
+    letter-spacing: 6px;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,229,255,0.6);
+  }
+
+  .logo span { color: var(--text-dim); font-weight: 300; }
+
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent3);
+    box-shadow: 0 0 8px var(--accent3);
+    animation: pulse-dot 2s ease-in-out infinite;
+    display: inline-block;
+    margin-right: 8px;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── LEFT PANEL ── */
+  #left-panel {
+    width: 220px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    overflow-y: auto;
+  }
+
+  .panel-section {
+    border-bottom: 1px solid var(--border);
+    padding: 14px 16px;
+  }
+
+  .panel-label {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+  }
+
+  .metric-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+  }
+
+  .metric-val {
+    font-size: 18px;
+    font-weight: 400;
+    color: var(--accent);
+    font-family: 'Share Tech Mono', monospace;
+    text-shadow: 0 0 10px rgba(0,229,255,0.4);
+  }
+
+  .metric-val.green { color: var(--accent3); text-shadow: 0 0 10px rgba(57,255,20,0.4); }
+  .metric-val.orange { color: var(--accent2); text-shadow: 0 0 10px rgba(255,107,53,0.4); }
+  .metric-val.yellow { color: var(--warn); text-shadow: 0 0 10px rgba(255,204,0,0.4); }
+
+  .bar-wrap {
+    background: rgba(255,255,255,0.04);
+    border-radius: 2px;
+    height: 4px;
+    margin-top: 2px;
+    margin-bottom: 10px;
+    overflow: hidden;
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+  }
+
+  /* Robot fleet list */
+  .robot-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(26,37,53,0.5);
+    font-size: 11px;
+  }
+
+  .r-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .r-name { color: var(--text); flex: 1; letter-spacing: 0.5px; }
+  .r-state { color: var(--text-dim); font-size: 9px; }
+  .r-batt { color: var(--warn); font-size: 10px; margin-left: auto; }
+
+  /* ── CANVAS ── */
+  #canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  #sim-canvas {
+    display: block;
+  }
+
+  /* ── RIGHT PANEL ── */
+  #right-panel {
+    width: 230px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    overflow-y: auto;
+  }
+
+  /* Order feed */
+  .order-entry {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    animation: slide-in 0.3s ease;
+  }
+
+  @keyframes slide-in {
+    from { transform: translateX(20px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  .order-id { color: var(--accent2); font-size: 11px; letter-spacing: 1px; }
+  .order-status-pending { color: var(--warn); }
+  .order-status-active  { color: var(--accent3); }
+  .order-status-done    { color: var(--text-dim); }
+
+  /* Bottom bar */
+  #footer {
+    height: 38px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 24px;
+    background: var(--panel);
+    font-size: 10px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+
+  .footer-item { display: flex; align-items: center; gap: 6px; }
+  .footer-tag {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+  }
+
+  /* Controls */
+  .ctrl-btn {
+    background: rgba(0,229,255,0.06);
+    border: 1px solid rgba(0,229,255,0.2);
+    color: var(--accent);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    padding: 6px 12px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: all 0.15s;
+    border-radius: 2px;
+    display: block;
+    width: 100%;
+    margin-bottom: 6px;
+    text-align: left;
+  }
+
+  .ctrl-btn:hover {
+    background: rgba(0,229,255,0.14);
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(0,229,255,0.2);
+  }
+
+  .ctrl-btn.danger {
+    color: var(--danger);
+    border-color: rgba(255,45,85,0.2);
+    background: rgba(255,45,85,0.06);
+  }
+
+  .ctrl-btn.danger:hover {
+    background: rgba(255,45,85,0.14);
+    border-color: var(--danger);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .legend-item {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 10px; color: var(--text-dim);
+    margin-bottom: 5px;
+  }
+  .legend-swatch {
+    width: 10px; height: 10px; border-radius: 1px; flex-shrink: 0;
+  }
+
+  .fps-counter {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    margin-left: auto;
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div id="header">
+  <div class="logo">NEXUS <span>/ FLEET COORDINATOR v2.1</span></div>
+  <div style="display:flex;align-items:center;gap:16px;font-size:11px;color:var(--text-dim)">
+    <span><span class="status-dot"></span>SIMULATION ACTIVE</span>
+    <span id="clock">00:00:00</span>
+    <span class="fps-counter" id="fps-disp">60 FPS</span>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- LEFT PANEL -->
+  <div id="left-panel">
+
+    <div class="panel-section">
+      <div class="panel-label">Fleet Metrics</div>
+
+      <div class="metric-row">
+        <span class="metric-label">UTILIZATION</span>
+        <span class="metric-val green" id="m-util">0%</span>
+      </div>
+      <div class="bar-wrap"><div class="bar-fill" id="b-util" style="width:0%"></div></div>
+
+      <div class="metric-row">
+        <span class="metric-label">ORDERS/MIN</span>
+        <span class="metric-val orange" id="m-opm">0.0</span>
+      </div>
+
+      <div class="metric-row">
+        <span class="metric-label">FULFILLED</span>
+        <span class="metric-val" id="m-fulfilled">0</span>
+      </div>
+
+      <div class="metric-row">
+        <span class="metric-label">ACTIVE ORDERS</span>
+        <span class="metric-val yellow" id="m-active">0</span>
+      </div>
+
+      <div class="metric-row">
+        <span class="metric-label">AVG BATTERY</span>
+        <span class="metric-val yellow" id="m-batt">100%</span>
+      </div>
+      <div class="bar-wrap">
+        <div class="bar-fill" id="b-batt" style="width:100%;background:var(--warn);box-shadow:0 0 6px var(--warn)"></div>
+      </div>
+
+      <div class="metric-row">
+        <span class="metric-label">COLLISIONS</span>
+        <span class="metric-val" id="m-col" style="color:var(--danger)">0</span>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="panel-label">Legend</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#00e5ff"></div>IDLE</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#39ff14"></div>MOVING</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#ffcc00"></div>CHARGING</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#ff2d55"></div>ERROR / LOW BATT</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#ff6b35"></div>PICKUP ZONE</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:rgba(0,229,255,0.15)"></div>SHIPPING BAY</div>
+    </div>
+
+    <div class="panel-section">
+      <div class="panel-label">Controls</div>
+      <button class="ctrl-btn" onclick="spawnOrder()">+ SPAWN ORDER</button>
+      <button class="ctrl-btn" onclick="spawnBatch()">+ BATCH (×5)</button>
+      <button class="ctrl-btn" onclick="addRobot()">+ ADD ROBOT</button>
+      <button class="ctrl-btn danger" onclick="togglePause()">⏸ PAUSE / RESUME</button>
+    </div>
+
+    <div class="panel-section" style="flex:1">
+      <div class="panel-label">Robot Fleet</div>
+      <div id="robot-list"></div>
+    </div>
+  </div>
+
+  <!-- CANVAS -->
+  <div id="canvas-wrap">
+    <canvas id="sim-canvas"></canvas>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div id="right-panel">
+
+    <div class="panel-section">
+      <div class="panel-label">Order Feed</div>
+      <div id="order-feed"></div>
+    </div>
+
+    <div class="panel-section" style="flex:1">
+      <div class="panel-label">Event Log</div>
+      <div id="event-log" style="font-size:9px;color:var(--text-dim);line-height:1.7"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- FOOTER -->
+<div id="footer">
+  <div class="footer-item">
+    <span class="footer-tag" style="color:var(--accent);border-color:rgba(0,229,255,0.3)">A*</span>
+    <span>Pathfinding Engine</span>
+  </div>
+  <div class="footer-item">
+    <span class="footer-tag" style="color:var(--accent3);border-color:rgba(57,255,20,0.3)">SPATIAL HASH</span>
+    <span>Collision Grid</span>
+  </div>
+  <div class="footer-item">
+    <span class="footer-tag" style="color:var(--accent2);border-color:rgba(255,107,53,0.3)">RAF</span>
+    <span>60 FPS Renderer</span>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:16px;font-size:9px">
+    <span id="f-robots">ROBOTS: 0</span>
+    <span id="f-orders">ORDERS: 0</span>
+    <span id="f-cells">GRID: 0×0</span>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  NEXUS — Autonomous Warehousing Simulator
+//  A* Pathfinding · Spatial Hash · 60FPS Canvas
+// ═══════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('sim-canvas');
+const ctx    = canvas.getContext('2d');
+const wrap   = document.getElementById('canvas-wrap');
+
+// ── CONFIG ─────────────────────────────────────────────────
+const CFG = {
+  CELL:         22,       // px per grid cell
+  ROBOT_R:      7,        // robot radius
+  NUM_ROBOTS:   18,       // starting robots
+  ROBOT_SPEED:  2.2,      // cells/sec base speed
+  BATT_DRAIN:   0.008,    // % per frame moving
+  BATT_CHARGE:  0.04,     // % per frame charging
+  BATT_LOW:     20,
+  BATT_CRITICAL:10,
+  ORDER_RATE:   4000,     // ms between auto orders
+  MAX_ORDERS:   80,
+  OBSTACLE_PCT: 0.11,
+};
+
+let COLS, ROWS, grid, spatialHash;
+let robots = [], orders = [], obstacles = new Set();
+let paused = false;
+let fulfilled = 0, collisionCount = 0;
+let lastOrderTime = 0, fulfilledLast = 0, lastMinute = Date.now();
+let ordersPerMin = 0;
+let frameCount = 0, lastFpsTime = performance.now(), fps = 60;
+let startTime = Date.now();
+let nextRobotId = 0;
+let nextOrderId = 0;
+
+// Zones
+let pickupZones = [], shippingBays = [], chargingStations = [];
+
+// ── RESIZE ─────────────────────────────────────────────────
+function resize() {
+  canvas.width  = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  COLS = Math.floor(canvas.width  / CFG.CELL);
+  ROWS = Math.floor(canvas.height / CFG.CELL);
+  buildGrid();
+  document.getElementById('f-cells').textContent = `GRID: ${COLS}×${ROWS}`;
+}
+
+// ── GRID BUILDER ───────────────────────────────────────────
+function buildGrid() {
+  grid = new Uint8Array(COLS * ROWS); // 0=free 1=obstacle
+  obstacles.clear();
+  pickupZones      = [];
+  shippingBays     = [];
+  chargingStations = [];
+
+  // Shipping bays — right edge
+  for (let r = 2; r < ROWS - 2; r += 4) {
+    shippingBays.push({ c: COLS - 2, r });
+    shippingBays.push({ c: COLS - 3, r });
+  }
+
+  // Pickup zones — scattered
+  const pickupCandidates = [];
+  for (let r = 2; r < ROWS - 2; r += 5) {
+    for (let c = 4; c < COLS - 6; c += 8) {
+      pickupCandidates.push({ c, r });
+    }
+  }
+  pickupZones = pickupCandidates.slice(0, Math.min(14, pickupCandidates.length));
+
+  // Charging stations — left edge
+  for (let r = 2; r < ROWS - 2; r += 5) {
+    chargingStations.push({ c: 1, r });
+  }
+
+  // Shelf obstacles (in clusters)
+  const reserved = new Set();
+  [...shippingBays, ...pickupZones, ...chargingStations].forEach(z => {
+    for (let dc = -1; dc <= 1; dc++)
+      for (let dr = -1; dr <= 1; dr++)
+        reserved.add(`${z.c+dc},${z.r+dr}`);
+  });
+  // Add perimeter roads (always free)
+  for (let c = 0; c < COLS; c++) reserved.add(`${c},0`);
+  for (let c = 0; c < COLS; c++) reserved.add(`${c},${ROWS-1}`);
+  for (let r = 0; r < ROWS; r++) reserved.add(`0,${r}`);
+  for (let r = 0; r < ROWS; r++) reserved.add(`${COLS-1},${r}`);
+
+  // Shelf blocks
+  const shelfW = 2, shelfH = 3, corridorV = 3, corridorH = 2;
+  for (let startR = 3; startR < ROWS - 4; startR += shelfH + corridorH) {
+    for (let startC = 5; startC < COLS - 7; startC += shelfW + corridorV) {
+      for (let dr = 0; dr < shelfH; dr++) {
+        for (let dc = 0; dc < shelfW; dc++) {
+          const c = startC + dc, r = startR + dr;
+          const key = `${c},${r}`;
+          if (c >= 0 && c < COLS && r >= 0 && r < ROWS && !reserved.has(key)) {
+            grid[r * COLS + c] = 1;
+            obstacles.add(key);
+          }
+        }
+      }
+    }
+  }
+
+  spatialHash = new SpatialHash(CFG.CELL * 3);
+}
+
+// ── SPATIAL HASH ───────────────────────────────────────────
+class SpatialHash {
+  constructor(cellSize) { this.cs = cellSize; this.map = new Map(); }
+  _key(x, y) { return `${Math.floor(x/this.cs)},${Math.floor(y/this.cs)}`; }
+  clear()      { this.map.clear(); }
+  insert(obj)  {
+    const k = this._key(obj.px, obj.py);
+    if (!this.map.has(k)) this.map.set(k, []);
+    this.map.get(k).push(obj);
+  }
+  nearby(x, y, r) {
+    const out = [];
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const k = `${Math.floor(x/this.cs)+dx},${Math.floor(y/this.cs)+dy}`;
+      const bucket = this.map.get(k);
+      if (bucket) bucket.forEach(o => { const d = dist2(o.px,o.py,x,y); if (d < r*r) out.push(o); });
+    }
+    return out;
+  }
+}
+
+function dist2(ax,ay,bx,by) { return (ax-bx)**2+(ay-by)**2; }
+function cellPx(c) { return c * CFG.CELL + CFG.CELL/2; }
+function cellPy(r) { return r * CFG.CELL + CFG.CELL/2; }
+function pxCell(px) { return Math.floor(px / CFG.CELL); }
+function pyCell(py) { return Math.floor(py / CFG.CELL); }
+
+// ── A* PATHFINDING ─────────────────────────────────────────
+function astar(sc, sr, ec, er) {
+  if (sc===ec && sr===er) return [];
+  const key  = (c,r) => r*COLS+c;
+  const h    = (c,r) => Math.abs(c-ec)+Math.abs(r-er);
+  const open = new MinHeap();
+  const gscore = new Float32Array(COLS*ROWS).fill(Infinity);
+  const came  = new Int32Array(COLS*ROWS).fill(-1);
+
+  gscore[key(sc,sr)] = 0;
+  open.push({ c:sc, r:sr, f: h(sc,sr) });
+
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
+  const diagCost = Math.SQRT2;
+
+  while (!open.empty()) {
+    const cur = open.pop();
+    const { c, r } = cur;
+    if (c===ec && r===er) {
+      // Reconstruct
+      const path = [];
+      let k = key(ec,er);
+      while (k !== -1) {
+        const rc = k % COLS, rr = Math.floor(k/COLS);
+        path.push({ c:rc, r:rr });
+        k = came[k];
+      }
+      return path.reverse();
+    }
+    for (const [dc,dr] of dirs) {
+      const nc=c+dc, nr=r+dr;
+      if (nc<0||nc>=COLS||nr<0||nr>=ROWS) continue;
+      if (grid[key(nc,nr)]===1) continue;
+      // Diagonal: ensure both cardinal cells are free
+      if (dc!==0&&dr!==0) {
+        if (grid[key(c+dc,r)]===1||grid[key(c,r+dr)]===1) continue;
+      }
+      const cost = (dc!==0&&dr!==0) ? diagCost : 1;
+      const ng = gscore[key(c,r)] + cost;
+      const nk = key(nc,nr);
+      if (ng < gscore[nk]) {
+        gscore[nk] = ng;
+        came[nk]   = key(c,r);
+        open.push({ c:nc, r:nr, f: ng+h(nc,nr) });
+      }
+    }
+  }
+  return null; // No path
+}
+
+// ── MIN HEAP ───────────────────────────────────────────────
+class MinHeap {
+  constructor() { this.h = []; }
+  push(n) { this.h.push(n); this._up(this.h.length-1); }
+  pop()   {
+    const top = this.h[0];
+    const last = this.h.pop();
+    if (this.h.length) { this.h[0]=last; this._down(0); }
+    return top;
+  }
+  empty() { return this.h.length===0; }
+  _up(i)  { while(i>0){ const p=(i-1)>>1; if(this.h[p].f<=this.h[i].f)break; [this.h[p],this.h[i]]=[this.h[i],this.h[p]]; i=p; } }
+  _down(i){ const n=this.h.length; while(true){ let s=i,l=2*i+1,r=2*i+2; if(l<n&&this.h[l].f<this.h[s].f)s=l; if(r<n&&this.h[r].f<this.h[s].f)s=r; if(s===i)break; [this.h[s],this.h[i]]=[this.h[i],this.h[s]]; i=s; } }
+}
+
+// ── ROBOT CLASS ────────────────────────────────────────────
+class Robot {
+  constructor(c, r, id) {
+    this.id     = id;
+    this.c      = c; this.r = r;
+    this.px     = cellPx(c); this.py = cellPy(r);
+    this.tx     = this.px;   this.ty = this.py;
+    this.path   = [];
+    this.pathIdx= 0;
+    this.state  = 'idle';   // idle|moving|charging|error
+    this.battery= 85 + Math.random()*15;
+    this.order  = null;
+    this.speed  = (CFG.ROBOT_SPEED + (Math.random()-0.5)*0.4) * CFG.CELL;
+    this.hue    = Math.random()*360;
+    this.trail  = [];
+    this.trailMax= 12;
+    // Sub-state for order: 'toPickup'|'toShipping'
+    this.phase  = null;
+  }
+
+  assignOrder(order) {
+    this.order = order;
+    order.robotId = this.id;
+    order.status = 'active';
+    this.phase = 'toPickup';
+    this._planPath(order.pickup.c, order.pickup.r);
+    this.state = 'moving';
+    logEvent(`R-${String(this.id).padStart(2,'0')} → ORDER #${order.id}`);
+  }
+
+  _planPath(tc, tr) {
+    const path = astar(pxCell(this.px), pyCell(this.py), tc, tr);
+    if (path && path.length > 1) {
+      this.path    = path;
+      this.pathIdx = 1;
+    } else {
+      this.path    = [];
+      this.pathIdx = 0;
+    }
+  }
+
+  goCharge() {
+    if (chargingStations.length === 0) return;
+    const st = chargingStations[this.id % chargingStations.length];
+    this.state = 'moving';
+    this.phase = 'toCharge';
+    this._planPath(st.c, st.r);
+  }
+
+  update(dt) {
+    if (this.state === 'charging') {
+      this.battery = Math.min(100, this.battery + CFG.BATT_CHARGE);
+      if (this.battery >= 98) { this.state = 'idle'; this.phase = null; }
+      return;
+    }
+    if (this.state === 'error') return;
+
+    if (this.path.length > 0 && this.pathIdx < this.path.length) {
+      const target = this.path[this.pathIdx];
+      const tx = cellPx(target.c), ty = cellPy(target.r);
+      const dx = tx - this.px, dy = ty - this.py;
+      const d  = Math.sqrt(dx*dx + dy*dy);
+      const step = this.speed * dt;
+
+      if (d <= step) {
+        this.px = tx; this.py = ty;
+        this.c  = target.c; this.r = target.r;
+        this.pathIdx++;
+
+        if (this.pathIdx >= this.path.length) {
+          this._reachedWaypoint();
+        }
+      } else {
+        this.px += (dx/d) * step;
+        this.py += (dy/d) * step;
+      }
+
+      this.battery -= CFG.BATT_DRAIN;
+      if (this.battery < CFG.BATT_CRITICAL) {
+        this.state = 'error';
+        if (this.order) { this.order.status='pending'; this.order.robotId=null; this.order=null; }
+        logEvent(`⚠ R-${String(this.id).padStart(2,'0')} BATTERY CRITICAL`);
+        return;
+      }
+      if (this.battery < CFG.BATT_LOW && this.phase !== 'toCharge') {
+        this.order = null;
+        this.goCharge();
+      }
+
+      // Trail
+      this.trail.push({ x: this.px, y: this.py });
+      if (this.trail.length > this.trailMax) this.trail.shift();
+
+      this.state = 'moving';
+    } else {
+      if (this.state !== 'charging') this.state = 'idle';
+    }
+  }
+
+  _reachedWaypoint() {
+    this.path = [];
+    if (this.phase === 'toPickup' && this.order) {
+      this.phase = 'toShipping';
+      const bay = shippingBays[Math.floor(Math.random()*shippingBays.length)];
+      this._planPath(bay.c, bay.r);
+    } else if (this.phase === 'toShipping' && this.order) {
+      fulfilled++;
+      this.order.status = 'done';
+      logEvent(`✓ ORDER #${this.order.id} DELIVERED`);
+      this.order  = null;
+      this.phase  = null;
+      this.state  = 'idle';
+      if (this.battery < CFG.BATT_LOW) this.goCharge();
+    } else if (this.phase === 'toCharge') {
+      this.state = 'charging';
+      this.phase = null;
+      logEvent(`⚡ R-${String(this.id).padStart(2,'0')} CHARGING`);
+    } else {
+      this.state = 'idle';
+      this.phase = null;
+    }
+  }
+
+  get color() {
+    if (this.state==='charging') return '#ffcc00';
+    if (this.state==='error'   ) return '#ff2d55';
+    if (this.state==='moving'  ) return '#39ff14';
+    return '#00e5ff';
+  }
+}
+
+// ── ORDER ──────────────────────────────────────────────────
+function createOrder() {
+  if (pickupZones.length === 0) return null;
+  const pickup = pickupZones[Math.floor(Math.random()*pickupZones.length)];
+  const o = {
+    id:      String(nextOrderId++).padStart(4,'0'),
+    pickup,
+    status:  'pending',
+    robotId: null,
+    ts:      Date.now()
+  };
+  orders.push(o);
+  if (orders.length > CFG.MAX_ORDERS) orders.shift();
+  addOrderToFeed(o);
+  return o;
+}
+
+// ── DISPATCH ───────────────────────────────────────────────
+function dispatch() {
+  const pending = orders.filter(o => o.status==='pending');
+  const idle    = robots.filter(r => r.state==='idle' && r.battery > CFG.BATT_LOW);
+  for (let i = 0; i < Math.min(pending.length, idle.length); i++) {
+    idle[i].assignOrder(pending[i]);
+  }
+}
+
+// ── INIT ───────────────────────────────────────────────────
+function init() {
+  resize();
+  robots = [];
+  for (let i = 0; i < CFG.NUM_ROBOTS; i++) spawnRobot();
+  for (let i = 0; i < 5; i++) createOrder();
+}
+
+function spawnRobot() {
+  // Find free cell near left side
+  for (let attempts = 0; attempts < 200; attempts++) {
+    const c = Math.floor(Math.random()*(COLS/2))+1;
+    const r = Math.floor(Math.random()*(ROWS-2))+1;
+    if (grid[r*COLS+c]===0) {
+      robots.push(new Robot(c, r, nextRobotId++));
+      return;
+    }
+  }
+}
+
+// ── PUBLIC CONTROLS ────────────────────────────────────────
+function spawnOrder()  { createOrder(); }
+function spawnBatch()  { for (let i=0;i<5;i++) createOrder(); }
+function addRobot()    { spawnRobot(); logEvent(`+ New robot added (${robots.length} total)`); }
+function togglePause() { paused = !paused; logEvent(paused ? '⏸ PAUSED' : '▶ RESUMED'); }
+
+// ── LOG & FEED ─────────────────────────────────────────────
+const logEl  = document.getElementById('event-log');
+const feedEl = document.getElementById('order-feed');
+let logLines = [];
+
+function logEvent(msg) {
+  const t = new Date(); const ts = `${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}:${t.getSeconds().toString().padStart(2,'0')}`;
+  logLines.unshift(`<span style="color:#1a3050">${ts}</span> ${msg}`);
+  if (logLines.length > 50) logLines.pop();
+  logEl.innerHTML = logLines.join('<br>');
+}
+
+function addOrderToFeed(o) {
+  const div = document.createElement('div');
+  div.className = 'order-entry';
+  div.id = `order-${o.id}`;
+  div.innerHTML = `<div class="order-id">#${o.id}</div><div class="order-status-pending">PENDING</div>`;
+  feedEl.insertBefore(div, feedEl.firstChild);
+  while (feedEl.children.length > 20) feedEl.removeChild(feedEl.lastChild);
+}
+
+function updateOrderFeed() {
+  orders.slice(-20).forEach(o => {
+    const el = document.getElementById(`order-${o.id}`);
+    if (!el) return;
+    const sd = el.querySelector('div:last-child');
+    if (!sd) return;
+    sd.className = `order-status-${o.status}`;
+    sd.textContent = o.status.toUpperCase() + (o.robotId!=null ? ` [R-${String(o.robotId).padStart(2,'0')}]` : '');
+  });
+}
+
+// ── RENDER ─────────────────────────────────────────────────
+function drawGrid() {
+  const cs = CFG.CELL;
+  ctx.strokeStyle = 'rgba(0,229,255,0.04)';
+  ctx.lineWidth   = 0.5;
+  for (let c=0; c<=COLS; c++) {
+    ctx.beginPath();
+    ctx.moveTo(c*cs, 0); ctx.lineTo(c*cs, canvas.height);
+    ctx.stroke();
+  }
+  for (let r=0; r<=ROWS; r++) {
+    ctx.beginPath();
+    ctx.moveTo(0, r*cs); ctx.lineTo(canvas.width, r*cs);
+    ctx.stroke();
+  }
+}
+
+function drawObstacles() {
+  const cs = CFG.CELL;
+  obstacles.forEach(key => {
+    const [c, r] = key.split(',').map(Number);
+    ctx.fillStyle = 'rgba(26,37,53,0.9)';
+    ctx.fillRect(c*cs+1, r*cs+1, cs-2, cs-2);
+    // Shelf texture
+    ctx.fillStyle = 'rgba(0,229,255,0.05)';
+    ctx.fillRect(c*cs+3, r*cs+3, cs-6, 3);
+    ctx.fillRect(c*cs+3, r*cs+cs-6, cs-6, 3);
+  });
+}
+
+function drawZones() {
+  const cs = CFG.CELL;
+  // Pickup zones
+  pickupZones.forEach(z => {
+    ctx.fillStyle   = 'rgba(255,107,53,0.15)';
+    ctx.strokeStyle = 'rgba(255,107,53,0.5)';
+    ctx.lineWidth   = 1;
+    ctx.fillRect  (z.c*cs+1, z.r*cs+1, cs-2, cs-2);
+    ctx.strokeRect(z.c*cs+1, z.r*cs+1, cs-2, cs-2);
+    ctx.fillStyle   = 'rgba(255,107,53,0.8)';
+    ctx.font        = '8px Share Tech Mono';
+    ctx.fillText('P', z.c*cs+7, z.r*cs+14);
+  });
+  // Shipping bays
+  shippingBays.forEach(z => {
+    ctx.fillStyle   = 'rgba(0,229,255,0.08)';
+    ctx.strokeStyle = 'rgba(0,229,255,0.3)';
+    ctx.lineWidth   = 1;
+    ctx.fillRect  (z.c*cs+1, z.r*cs+1, cs-2, cs-2);
+    ctx.strokeRect(z.c*cs+1, z.r*cs+1, cs-2, cs-2);
+  });
+  // Charging stations
+  chargingStations.forEach(z => {
+    ctx.fillStyle   = 'rgba(255,204,0,0.12)';
+    ctx.strokeStyle = 'rgba(255,204,0,0.4)';
+    ctx.lineWidth   = 1;
+    ctx.fillRect  (z.c*cs+1, z.r*cs+1, cs-2, cs-2);
+    ctx.strokeRect(z.c*cs+1, z.r*cs+1, cs-2, cs-2);
+    ctx.fillStyle   = 'rgba(255,204,0,0.8)';
+    ctx.font        = '9px Share Tech Mono';
+    ctx.fillText('⚡', z.c*cs+4, z.r*cs+15);
+  });
+}
+
+function drawRobots() {
+  robots.forEach(rb => {
+    // Trail
+    if (rb.trail.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(rb.trail[0].x, rb.trail[0].y);
+      rb.trail.forEach(p => ctx.lineTo(p.x, p.y));
+      ctx.strokeStyle = rb.color + '33';
+      ctx.lineWidth   = 1.5;
+      ctx.stroke();
+    }
+
+    const x = rb.px, y = rb.py, R = CFG.ROBOT_R;
+
+    // Glow
+    const grd = ctx.createRadialGradient(x,y,0, x,y,R*3);
+    grd.addColorStop(0, rb.color+'40');
+    grd.addColorStop(1, 'transparent');
+    ctx.fillStyle = grd;
+    ctx.beginPath(); ctx.arc(x,y,R*3,0,Math.PI*2); ctx.fill();
+
+    // Body
+    ctx.fillStyle   = rb.color + 'cc';
+    ctx.strokeStyle = rb.color;
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath(); ctx.arc(x,y,R,0,Math.PI*2);
+    ctx.fill(); ctx.stroke();
+
+    // Inner dot
+    ctx.fillStyle = '#070a0f';
+    ctx.beginPath(); ctx.arc(x,y,R*0.35,0,Math.PI*2); ctx.fill();
+
+    // Battery ring
+    const battFrac = rb.battery/100;
+    ctx.beginPath();
+    ctx.arc(x, y, R+3, -Math.PI/2, -Math.PI/2 + battFrac*2*Math.PI);
+    ctx.strokeStyle = battFrac > 0.3 ? 'rgba(57,255,20,0.5)' : 'rgba(255,45,85,0.7)';
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+
+    // Label
+    ctx.fillStyle = rb.color;
+    ctx.font      = '8px Share Tech Mono';
+    ctx.fillText(`R${rb.id}`, x - 6, y + R + 13);
+  });
+}
+
+function drawPaths() {
+  robots.forEach(rb => {
+    if (rb.path.length < 2 || rb.pathIdx >= rb.path.length) return;
+    ctx.beginPath();
+    ctx.moveTo(rb.px, rb.py);
+    for (let i = rb.pathIdx; i < rb.path.length; i++) {
+      ctx.lineTo(cellPx(rb.path[i].c), cellPy(rb.path[i].r));
+    }
+    ctx.strokeStyle = rb.color + '28';
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([3,4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+}
+
+// ── UPDATE METRICS ─────────────────────────────────────────
+function updateMetrics() {
+  const total     = robots.length;
+  const active    = robots.filter(r=>r.state==='moving').length;
+  const utilPct   = total > 0 ? Math.round(active/total*100) : 0;
+  const avgBatt   = total > 0 ? Math.round(robots.reduce((s,r)=>s+r.battery,0)/total) : 0;
+  const activeOrd = orders.filter(o=>o.status==='active').length;
+
+  // Orders/min
+  const now = Date.now();
+  if (now - lastMinute >= 5000) {
+    ordersPerMin = ((fulfilled - fulfilledLast) / 5) * 60;
+    fulfilledLast = fulfilled;
+    lastMinute = now;
+  }
+
+  document.getElementById('m-util').textContent     = utilPct + '%';
+  document.getElementById('b-util').style.width      = utilPct + '%';
+  document.getElementById('m-opm').textContent       = ordersPerMin.toFixed(1);
+  document.getElementById('m-fulfilled').textContent = fulfilled;
+  document.getElementById('m-active').textContent    = activeOrd;
+  document.getElementById('m-batt').textContent      = avgBatt + '%';
+  document.getElementById('b-batt').style.width      = avgBatt + '%';
+  document.getElementById('m-col').textContent       = collisionCount;
+  document.getElementById('f-robots').textContent    = `ROBOTS: ${total}`;
+  document.getElementById('f-orders').textContent    = `ORDERS: ${orders.length}`;
+  document.getElementById('fps-disp').textContent    = fps + ' FPS';
+
+  // Robot list
+  const listEl = document.getElementById('robot-list');
+  const visible = robots.slice(0, 30);
+  listEl.innerHTML = visible.map(rb => `
+    <div class="robot-entry">
+      <div class="r-dot" style="background:${rb.color};box-shadow:0 0 5px ${rb.color}"></div>
+      <div class="r-name">R-${String(rb.id).padStart(2,'0')}</div>
+      <div class="r-state">${rb.state.toUpperCase()}</div>
+      <div class="r-batt">${Math.round(rb.battery)}%</div>
+    </div>
+  `).join('');
+}
+
+// ── MAIN LOOP ──────────────────────────────────────────────
+let lastTs = 0;
+
+function loop(ts) {
+  requestAnimationFrame(loop);
+
+  // FPS
+  frameCount++;
+  if (ts - lastFpsTime >= 500) {
+    fps = Math.round(frameCount / ((ts - lastFpsTime) / 1000));
+    frameCount = 0; lastFpsTime = ts;
+  }
+
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs   = ts;
+
+  if (!paused) {
+    // Spatial hash rebuild
+    spatialHash.clear();
+    robots.forEach(r => spatialHash.insert(r));
+
+    // Update robots
+    robots.forEach(r => r.update(dt));
+
+    // Auto-spawn orders
+    if (ts - lastOrderTime > CFG.ORDER_RATE && orders.filter(o=>o.status==='pending').length < 8) {
+      createOrder();
+      lastOrderTime = ts;
+    }
+
+    // Dispatch
+    if (Math.random() < 0.1) dispatch();
+
+    // Recover errored robots that have somehow recharged
+    robots.filter(r=>r.state==='error').forEach(r => {
+      r.battery = Math.min(100, r.battery + 0.05);
+      if (r.battery >= 30) { r.state='idle'; logEvent(`R-${String(r.id).padStart(2,'0')} RECOVERED`); }
+    });
+
+    updateOrderFeed();
+  }
+
+  // Render
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#070a0f';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  drawGrid();
+  drawObstacles();
+  drawZones();
+  drawPaths();
+  drawRobots();
+
+  // Clock
+  const elapsed = Math.floor((Date.now()-startTime)/1000);
+  const hh = String(Math.floor(elapsed/3600)).padStart(2,'0');
+  const mm = String(Math.floor((elapsed%3600)/60)).padStart(2,'0');
+  const ss = String(elapsed%60).padStart(2,'0');
+  document.getElementById('clock').textContent = `${hh}:${mm}:${ss}`;
+
+  if (frameCount % 10 === 0) updateMetrics();
+}
+
+// ── BOOTSTRAP ──────────────────────────────────────────────
+window.addEventListener('resize', () => { resize(); });
+init();
+requestAnimationFrame(loop);
+dispatch();
+logEvent('▶ NEXUS FLEET COORDINATOR ONLINE');
+logEvent(`Grid: ${COLS}×${ROWS} | Robots: ${robots.length}`);
+</script>
+</body>
+</html>
