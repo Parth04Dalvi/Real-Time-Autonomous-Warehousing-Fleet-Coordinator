@@ -2,7 +2,7 @@
 
 NEXUS is a high-performance, multi-agent autonomous warehousing simulator designed to model, visualize, and optimize AGV (Automated Guided Vehicle) fleet coordination in real time. Built with a modular architecture, NEXUS utilizes a **Time-Expanded Space-Time $A^*$ Pathfinder** to eliminate deadlocks, an **Auction-Based Task Broker** for efficient job allocation, and a localized **Spatial Hash Grid paired with Reynolds Steering Behaviors** for dynamic collision avoidance at 60 FPS.
 
-![NEXUS Dashboard Interface](https://via.placeholder.com/800x450?text=NEXUS+Fleet+Coordinator+Dashboard+UI)
+
 
 ---
 
